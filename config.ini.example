@@ -1,0 +1,19 @@
+[Settings]
+GamePath=C:\Program Files (x86)\Steam\steamapps\common\Quake 2\quake2.exe
+WindowTitle=Quake II- Version Date: Oct 31 2023 (Vulkan)
+ExeName=quake2ex_steam.exe
+RestartTimes=02:00,14:00
+CrashMessages=Exception caught in main,ERROR_DEVICE_LOST,Z_Free: bad magic
+MapCount=11
+ExecConfigs=config1.cfg,config2.cfg
+Debug=true
+
+[Messages]
+; Interval between full message cycles (in minutes)
+Interval=5           
+BetweenDelay=500
+; Delay between individual messages (in milliseconds)
+Message1=say ** Welcome to the server **
+Message2=say This server runs custom maps which may take a few minutes to download.
+Message3=say There is no progress indicator, please be patient.
+
