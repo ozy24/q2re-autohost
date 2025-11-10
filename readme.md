@@ -28,18 +28,6 @@ This AutoHotkey v2 script automatically monitors and restarts a running Quake II
 
 After a short delay, the game will launch, start a multiplayer server, and execute the specified configurations.
 
-Example Quake II server configs are included in the `ServerConfigs` folder:
-
-- `ffa.cfg` – FFA config for vanilla Q2RE listen servers  
-- `ffa-q2eaks.cfg` – FFA config for servers running [Q2Eaks](https://github.com/ceeeKay/Q2Eaks)  
-- `ffa-mm.cfg` – FFA config for servers using [MuffMode](https://github.com/themuffinator/muffmode)  
-- `customs.cfg` – Maplist config for MuffMode servers
-
-To use, copy these files to:  
-`C:\Program Files (x86)\Steam\steamapps\common\Quake 2\rerelease\baseq2\`
-
----
-
 ## ⚙️ Configuration Options (`config.ini`)
 
 ### [Settings]
@@ -51,7 +39,8 @@ To use, copy these files to:
 | `RestartTimes`  | Comma-separated list of `HH:mm` times to auto-restart     |
 | `CrashMessages` | Comma-separated list of known crash message strings       |
 | `ExecConfigs`   | Comma-separated config files to execute (e.g., `ffa.cfg`) |
-| `MapCount`      | Number of maps to cycle using `nextmap`                   |
+| `ExecConfigDelay` | Delay (ms) between sending each `exec` command in-game   |
+| `AutoStart`     | `true` / `false` — launch AutoHost automatically on start |
 | `Debug`         | `true` / `false` — enable or disable log output           |
 
 ### [Messages]

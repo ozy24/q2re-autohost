@@ -4,9 +4,19 @@ WindowTitle=Quake II- Version Date: Oct 31 2023 (Vulkan)
 ExeName=quake2ex_steam.exe
 RestartTimes=02:00,14:00
 CrashMessages=Exception caught in main,ERROR_DEVICE_LOST,Z_Free: bad magic
-MapCount=11
 ExecConfigs=config1.cfg,config2.cfg
+ExecConfigDelay=500
+AutoStart=false
 Debug=true
+
+; Optional: Timing configuration (in milliseconds)
+; Adjust these values if your system is slower or faster
+; StartupWaitTime: Time to wait for game to fully launch (default: 15000ms)
+; ProcessCloseWaitTime: Time to wait after closing existing game process (default: 10000ms)
+; MenuNavigationDelay: Delay between menu navigation steps (default: 500ms)
+StartupWaitTime=15000
+ProcessCloseWaitTime=10000
+MenuNavigationDelay=500
 
 [Messages]
 ; Interval between full message cycles (in minutes)
