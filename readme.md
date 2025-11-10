@@ -28,6 +28,10 @@ This AutoHotkey v2 script automatically monitors and restarts a running Quake II
 
 After a short delay, the game will launch, start a multiplayer server, and execute the specified configurations.
 
+Example Quake II server configs are provided in the `quake2-configs` folder. Copy any files you want to use into your Quake install at:
+`<Quake 2 install>\rerelease\baseq2\`
+The game only reads configs from `baseq2`, so the bundle is just for reference.
+
 ## ⚙️ Configuration Options (`config.ini`)
 
 ### [Settings]
