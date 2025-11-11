@@ -23,7 +23,10 @@ MenuNavigationDelay=500
 Interval=5           
 BetweenDelay=500
 ; Delay between individual messages (in milliseconds)
+Message1Key=j
 Message1=say ** Welcome to the server **
+Message2Key=k
 Message2=say This server runs custom maps which may take a few minutes to download.
+Message3Key=l
 Message3=say There is no progress indicator, please be patient.
 

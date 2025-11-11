@@ -10,7 +10,7 @@ ArrayToString(arr, delimiter := ", ") {
 
 /* 
   Q2REAutohost.ahk - Quake II Remastered Listen Server Auto-Host
-  Version: 2.0.0
+  Version: 2.1.0
 
   Automates launching, configuring, and managing a multiplayer listen server 
   in the Quake II Remastered Edition (Kex engine) for Steam or GOG.
@@ -35,13 +35,24 @@ ArrayToString(arr, delimiter := ", ") {
   Please refer to README.MD for setup details.
 */
 
+/*
+ Changelog:
+ 2.1.0
+   - Added Config tab bindings for Reminder Messages with Add/Update/Remove buttons
+   - Implemented reminder binding clipboard commands
+   - Added unsaved changes tracking with UI indicator
+   - Added clipboard generation and keybinding reminder sequence
+   - Centered unsaved changes label and aligned save/reload controls
+   - Fixed map property access in reminder timers
+*/
+
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 SendMode("Input")
 TraySetIcon(A_ScriptDir "\icon.png")
 
 ; --- Global Variables ---
-global ScriptVersion := "2.0.0"
+global ScriptVersion := "2.1.0"
 global LastRunTime := ""
 global DebugMode := true
 global RestartTimes := []
@@ -50,7 +61,7 @@ global GamePath := ""
 global WindowTitle := ""
 global ExeName := ""
 global ExecConfigs := []
-global MessageList := []
+global ReminderBindings := []
 global MessageInterval := 300000
 global MessageDelay := 500
 global GameIsStarting := false
@@ -64,6 +75,8 @@ global ExecConfigDelay := 500
 global ScheduledQuitPending := false
 global ScheduledQuitTime := ""
 global AutoStartEnabled := false
+global UnsavedChanges := false
+global SuppressUnsavedTracking := false
 
 ; --- GUI Variables ---
 global MainGui := ""
@@ -76,12 +89,35 @@ global AutoHostRunning := false
 global GamePathEdit := ""
 global AutoHostStatusText := ""
 global AutoStartCheckbox := ""
+global UnsavedLabel := ""
+
+; --- Config Tab GUI Controls ---
+global ConfigGamePathEdit := ""
+global ConfigGamePathBrowseBtn := ""
+global ConfigWindowTitleEdit := ""
+global ConfigExeNameEdit := ""
+global ConfigRestartTimesEdit := ""
+global ConfigStartupWaitEdit := ""
+global ConfigProcessCloseWaitEdit := ""
+global ConfigMenuDelayEdit := ""
+global ConfigExecDelayEdit := ""
+global ConfigExecConfigsEdit := ""
+global ConfigCrashMessagesEdit := ""
+global ConfigDebugCheckbox := ""
+
+; --- Messages Tab GUI Controls ---
+global MessagesIntervalEdit := ""
+global MessagesDelayEdit := ""
+global MessagesKeyEdit := ""
+global MessagesTextEdit := ""
+global MessagesListView := ""
+global MessagesCommandsEdit := ""
 
 
 ; --- Read config.ini ---
 ReadConfig() {
-    global RestartTimes, DebugMode, CrashMessages, GamePath, WindowTitle, ExeName, ExecConfigs, MessageList, MessageInterval, MessageDelay
-    global StartupWaitTime, ProcessCloseWaitTime, MenuNavigationDelay, ExecConfigDelay, AutoStartEnabled
+    global RestartTimes, DebugMode, CrashMessages, GamePath, WindowTitle, ExeName, ExecConfigs, MessageInterval, MessageDelay
+    global StartupWaitTime, ProcessCloseWaitTime, MenuNavigationDelay, ExecConfigDelay, AutoStartEnabled, ReminderBindings
     iniPath := A_ScriptDir "\config.ini"
 
     times := IniRead(iniPath, "Settings", "RestartTimes", "06:00,17:00")
@@ -151,19 +187,38 @@ ReadConfig() {
     MessageInterval := Number(IniRead(iniPath, "Messages", "Interval", "5")) * 60000
     MessageDelay := Number(IniRead(iniPath, "Messages", "BetweenDelay", "500"))
 
-    MessageList := []
+    ReminderBindings := []
     i := 1
     while true {
-        key := "Message" . i
-        msg := IniRead(iniPath, "Messages", key, "")
-        if (msg = "")
+        keyEntry := IniRead(iniPath, "Messages", "Message" . i . "Key", "__missing__")
+        textEntry := IniRead(iniPath, "Messages", "Message" . i . "Text", "__missing__")
+        legacyEntry := IniRead(iniPath, "Messages", "Message" . i, "__missing__")
+
+        if (keyEntry = "__missing__" && textEntry = "__missing__" && legacyEntry = "__missing__")
             break
-        MessageList.Push(Trim(msg))
+
+        keyValue := (keyEntry = "__missing__") ? "" : Trim(keyEntry)
+        textValue := ""
+        if (textEntry != "__missing__")
+            textValue := Trim(textEntry)
+        else if (legacyEntry != "__missing__")
+            textValue := Trim(legacyEntry)
+
+        if (keyValue != "" || textValue != "") {
+            binding := Map()
+            binding["Key"] := keyValue
+            binding["Text"] := textValue
+            ReminderBindings.Push(binding)
+        }
         i++
     }
 
     if (AutoStartCheckbox)
         AutoStartCheckbox.Value := AutoStartEnabled
+
+    PopulateConfigTab()
+    PopulateMessagesTab()
+    ClearUnsavedChanges()
 
     ; --- Validate configuration ---
     ValidateConfig()
@@ -217,6 +272,269 @@ ValidateConfig() {
     Log("Configuration validated successfully")
 }
 
+PopulateConfigTab() {
+    global ConfigGamePathEdit, ConfigWindowTitleEdit, ConfigExeNameEdit
+    global ConfigRestartTimesEdit, ConfigStartupWaitEdit, ConfigProcessCloseWaitEdit
+    global ConfigMenuDelayEdit, ConfigExecDelayEdit, ConfigExecConfigsEdit
+    global ConfigCrashMessagesEdit, ConfigDebugCheckbox
+    global GamePath, WindowTitle, ExeName, RestartTimes, StartupWaitTime, ProcessCloseWaitTime
+    global MenuNavigationDelay, ExecConfigDelay, ExecConfigs, CrashMessages
+    global DebugMode, SuppressUnsavedTracking
+
+    SuppressUnsavedTracking := true
+    if !ConfigGamePathEdit {
+        SuppressUnsavedTracking := false
+        return
+    }
+
+    ConfigGamePathEdit.Value := GamePath
+    if ConfigWindowTitleEdit
+        ConfigWindowTitleEdit.Value := WindowTitle
+    if ConfigExeNameEdit
+        ConfigExeNameEdit.Value := ExeName
+    if ConfigRestartTimesEdit
+        ConfigRestartTimesEdit.Value := ArrayToString(RestartTimes, ", ")
+    if ConfigStartupWaitEdit
+        ConfigStartupWaitEdit.Value := StartupWaitTime
+    if ConfigProcessCloseWaitEdit
+        ConfigProcessCloseWaitEdit.Value := ProcessCloseWaitTime
+    if ConfigMenuDelayEdit
+        ConfigMenuDelayEdit.Value := MenuNavigationDelay
+    if ConfigExecDelayEdit
+        ConfigExecDelayEdit.Value := ExecConfigDelay
+    if ConfigExecConfigsEdit
+        ConfigExecConfigsEdit.Value := ExecConfigs.Length ? ArrayToString(ExecConfigs, "`n") : ""
+    if ConfigCrashMessagesEdit
+        ConfigCrashMessagesEdit.Value := CrashMessages.Length ? ArrayToString(CrashMessages, "`n") : ""
+    if ConfigDebugCheckbox
+        ConfigDebugCheckbox.Value := DebugMode
+    SuppressUnsavedTracking := false
+}
+
+PopulateMessagesTab() {
+    global MessagesIntervalEdit, MessagesDelayEdit, MessagesListView
+    global MessagesCommandsEdit, MessagesKeyEdit, MessagesTextEdit
+    global MessageInterval, MessageDelay, ReminderBindings, SuppressUnsavedTracking
+
+    SuppressUnsavedTracking := true
+    if MessagesIntervalEdit
+        MessagesIntervalEdit.Value := MessageInterval > 0 ? Round(MessageInterval / 60000, 2) : ""
+    if MessagesDelayEdit
+        MessagesDelayEdit.Value := MessageDelay
+    if MessagesKeyEdit
+        MessagesKeyEdit.Value := ""
+    if MessagesTextEdit
+        MessagesTextEdit.Value := ""
+
+    if MessagesListView {
+        MessagesListView.Delete()
+        for binding in ReminderBindings {
+            key := binding.Has("Key") ? binding["Key"] : ""
+            text := binding.Has("Text") ? binding["Text"] : ""
+            MessagesListView.Add("", key, text)
+        }
+    }
+
+    UpdateMessagesCommandsPreview()
+    SuppressUnsavedTracking := false
+}
+
+UpdateMessagesCommandsPreview() {
+    global MessagesCommandsEdit, ReminderBindings
+
+    if !MessagesCommandsEdit
+        return
+
+    lines := []
+    dq := Chr(34)
+    backslash := Chr(92)
+    for binding in ReminderBindings {
+        key := binding.Has("Key") ? Trim(binding["Key"]) : ""
+        text := binding.Has("Text") ? binding["Text"] : ""
+        if (key = "" && text = "")
+            continue
+
+        escapedText := StrReplace(text, dq, backslash . dq)
+        if (key != "")
+            lines.Push("bind " . key . " say " . dq . escapedText . dq)
+        else
+            lines.Push("say " . dq . escapedText . dq)
+    }
+
+    MessagesCommandsEdit.Value := lines.Length ? ArrayToString(lines, "`r`n") : ""
+}
+
+MarkUnsavedChanges(*) {
+    global SuppressUnsavedTracking, UnsavedChanges, UnsavedLabel
+    if SuppressUnsavedTracking
+        return
+    if !UnsavedChanges {
+        UnsavedChanges := true
+        if (UnsavedLabel)
+            UnsavedLabel.Value := "Unsaved changes - click Save to persist."
+    }
+}
+
+ClearUnsavedChanges() {
+    global UnsavedChanges, UnsavedLabel
+    UnsavedChanges := false
+    if (UnsavedLabel)
+        UnsavedLabel.Value := ""
+}
+
+MessagesListViewSelect(LV, RowNumber) {
+    global MessagesKeyEdit, MessagesTextEdit, ReminderBindings
+
+    if (RowNumber <= 0 || RowNumber > ReminderBindings.Length)
+        return
+
+    binding := ReminderBindings[RowNumber]
+    if MessagesKeyEdit
+        MessagesKeyEdit.Value := binding.Has("Key") ? binding["Key"] : ""
+    if MessagesTextEdit
+        MessagesTextEdit.Value := binding.Has("Text") ? binding["Text"] : ""
+}
+
+AddReminderBinding() {
+    global MessagesKeyEdit, MessagesTextEdit, MessagesListView
+    global ReminderBindings
+
+    key := MessagesKeyEdit ? Trim(MessagesKeyEdit.Value) : ""
+    message := MessagesTextEdit ? Trim(MessagesTextEdit.Value) : ""
+
+    if (key = "") {
+        MsgBox("Enter a key binding (single letter or key).", "Reminder Binding", 48)
+        return
+    }
+
+    if (StrLen(key) > 1) {
+        MsgBox("Key binding should be a single character.", "Reminder Binding", 48)
+        return
+    }
+
+    if (message = "") {
+        MsgBox("Enter a message for this binding.", "Reminder Binding", 48)
+        return
+    }
+
+    key := StrLower(key)
+
+    ; Prevent duplicate keys
+    for entry in ReminderBindings {
+        entryKey := entry.Has("Key") ? StrLower(entry["Key"]) : ""
+        if (entryKey = key) {
+            MsgBox("A binding for key '" . key . "' already exists. Use Update to modify it.", "Reminder Binding", 48)
+            return
+        }
+    }
+
+    binding := Map()
+    binding["Key"] := key
+    binding["Text"] := message
+    ReminderBindings.Push(binding)
+    MarkUnsavedChanges()
+
+    PopulateMessagesTab()
+
+    if MessagesListView {
+        lastIndex := ReminderBindings.Length
+        if (lastIndex > 0) {
+            MessagesListView.Modify(lastIndex, "Select Focus")
+            MessagesListViewSelect(MessagesListView, lastIndex)
+        }
+    }
+}
+
+UpdateReminderBinding() {
+    global MessagesKeyEdit, MessagesTextEdit, MessagesListView
+    global ReminderBindings
+
+    key := MessagesKeyEdit ? Trim(MessagesKeyEdit.Value) : ""
+    message := MessagesTextEdit ? Trim(MessagesTextEdit.Value) : ""
+
+    if (key = "") {
+        MsgBox("Enter a key binding (single letter or key).", "Reminder Binding", 48)
+        return
+    }
+
+    if (StrLen(key) > 1) {
+        MsgBox("Key binding should be a single character.", "Reminder Binding", 48)
+        return
+    }
+
+    if (message = "") {
+        MsgBox("Enter a message for this binding.", "Reminder Binding", 48)
+        return
+    }
+
+    key := StrLower(key)
+
+    if !MessagesListView {
+        MsgBox("Select a binding to update from the list.", "Reminder Binding", 48)
+        return
+    }
+
+    selectedIndex := MessagesListView.GetNext()
+    if (!selectedIndex || selectedIndex > ReminderBindings.Length) {
+        MsgBox("Select a binding to update from the list.", "Reminder Binding", 48)
+        return
+    }
+
+    ; Check for duplicate key on a different row
+    for idx, entry in ReminderBindings {
+        if (idx = selectedIndex)
+            continue
+        entryKey := entry.Has("Key") ? StrLower(entry["Key"]) : ""
+        if (entryKey = key) {
+            MsgBox("A different binding already uses key '" . key . "'. Remove it first or choose another key.", "Reminder Binding", 48)
+            return
+        }
+    }
+
+    binding := Map()
+    binding["Key"] := key
+    binding["Text"] := message
+    ReminderBindings[selectedIndex] := binding
+    MarkUnsavedChanges()
+
+    PopulateMessagesTab()
+
+    if MessagesListView {
+        MessagesListView.Modify(selectedIndex, "Select Focus")
+        MessagesListViewSelect(MessagesListView, selectedIndex)
+    }
+}
+
+RemoveReminderBinding() {
+    global MessagesListView, ReminderBindings
+
+    if !MessagesListView
+        return
+
+    row := MessagesListView.GetNext()
+    if (!row)
+        return
+
+    ReminderBindings.RemoveAt(row)
+    MarkUnsavedChanges()
+    PopulateMessagesTab()
+}
+
+CopyReminderCommands() {
+    global MessagesCommandsEdit
+
+    if !MessagesCommandsEdit
+        return
+
+    text := MessagesCommandsEdit.Value
+    if (Trim(text) = "") {
+        MsgBox("There are no commands to copy. Add at least one reminder binding.", "Copy Commands", 48)
+        return
+    }
+
+    A_Clipboard := text
+    MsgBox("Commands copied to clipboard.", "Copy Commands", 64)
+}
 ; --- Logging function ---
 Log(msg) {
     global DebugMode, LogControl, MainGui
@@ -405,6 +723,8 @@ CheckAndStartGame(manualLaunch := false) {
         Sleep(ExecConfigDelay)
         Log("Config command sent: " . cfg)
     }
+    Sleep(500)
+    Send("{SC029}")
 
     SetTimer(SendReminderMessage, MessageInterval)
     Log("Started reminder timer with interval: " . MessageInterval . "ms")
@@ -569,7 +889,7 @@ CheckScheduledQuit() {
 }
 
 SendReminderMessage() {
-    global MessageList, MessageDelay, AutoHostRunning
+    global ReminderBindings, MessageDelay, AutoHostRunning
     
     ; Only send reminders if AutoHost is running
     if (!AutoHostRunning) {
@@ -582,12 +902,26 @@ SendReminderMessage() {
         return
     }
 
-    for msg in MessageList {
-        Send(msg)
-        Sleep(500)
-        Send("{enter}")
+    for binding in ReminderBindings {
+        key := binding.Has("Key") ? Trim(binding["Key"]) : ""
+        text := binding.Has("Text") ? binding["Text"] : ""
+
+        if (key = "" && text = "")
+            continue
+
+        if (key != "") {
+            Send("{" . key . " down}")
+            Sleep(60)
+            Send("{" . key . " up}")
+            Log(">>> Fired reminder key '" . key . "'" . (text != "" ? " (" . text . ")" : ""))
+        } else if (text != "") {
+            Send(text)
+            Sleep(120)
+            Send("{Enter}")
+            Log(">>> Sent reminder text: " . text)
+        }
+
         Sleep(MessageDelay)
-        Log(">>> Sent reminder: " . msg)
     }
 }
 
@@ -623,7 +957,14 @@ CheckCrashWindow() {
 ; --- GUI Functions ---
 
 CreateGUI() {
-    global MainGui, StatusText, NextRestartText, MonitoringText, LogControl, ScriptVersion, GamePathEdit, AutoHostStatusText, GamePath
+    global MainGui, StatusText, NextRestartText, MonitoringText, LogControl, ScriptVersion, GamePathEdit, AutoHostStatusText, GamePath, UnsavedLabel
+    global ConfigGamePathEdit, ConfigGamePathBrowseBtn, ConfigWindowTitleEdit, ConfigExeNameEdit
+    global ConfigRestartTimesEdit, ConfigStartupWaitEdit, ConfigProcessCloseWaitEdit
+    global ConfigMenuDelayEdit, ConfigExecDelayEdit, ConfigExecConfigsEdit, ConfigCrashMessagesEdit
+    global ConfigDebugCheckbox, AutoStartCheckbox
+    global MessagesIntervalEdit, MessagesDelayEdit, MessagesKeyEdit, MessagesTextEdit, MessagesListView, MessagesCommandsEdit
+    global AutoStartEnabled, DebugMode, RestartTimes, StartupWaitTime, ProcessCloseWaitTime
+    global MenuNavigationDelay, ExecConfigDelay, ExecConfigs, CrashMessages, MessageInterval, MessageDelay, ReminderBindings
     
     MainGui := Gui("+Resize", "Q2RE AutoHost Manager v" . ScriptVersion)
     iconPath := A_ScriptDir "\icon.png"
@@ -634,7 +975,7 @@ CreateGUI() {
     MainGui.OnEvent("Size", GuiResize)
     
     ; Create Tab control
-    Tab := MainGui.Add("Tab3", "x10 y10 w660 h490", ["Status", "Controls", "Logs"])
+    Tab := MainGui.Add("Tab3", "x10 y10 w660 h640", ["Status", "Config", "Messages", "Controls", "Logs", "About"])
     
     ; === STATUS TAB ===
     Tab.UseTab("Status")
@@ -675,6 +1016,98 @@ CreateGUI() {
     MainGui.Add("Text", "x50 y440 w120", "Reminder Timer:")
     global ReminderTimerText := MainGui.Add("Text", "x180 y440 w450", "Inactive")
     
+    ; === CONFIG TAB ===
+    Tab.UseTab("Config")
+
+    ; General Settings
+    MainGui.Add("GroupBox", "x30 y50 w620 h180", "General Settings")
+    MainGui.Add("Text", "x50 y80 w130", "Game Path:")
+    ConfigGamePathEdit := MainGui.Add("Edit", "x190 y78 w360 r1", GamePath)
+    ConfigGamePathBrowseBtn := MainGui.Add("Button", "x560 y78 w70 h24", "Browse...")
+    ConfigGamePathBrowseBtn.OnEvent("Click", (*) => ConfigSelectGamePath())
+    ConfigGamePathEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x50 y115 w130", "Window Title:")
+    ConfigWindowTitleEdit := MainGui.Add("Edit", "x190 y113 w440 r1", WindowTitle)
+    ConfigWindowTitleEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x50 y150 w130", "Executable Name:")
+    ConfigExeNameEdit := MainGui.Add("Edit", "x190 y148 w220 r1", ExeName)
+    ConfigExeNameEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    AutoStartCheckbox := MainGui.Add("Checkbox", "x430 y147", "Start AutoHost on script launch")
+    AutoStartCheckbox.Value := AutoStartEnabled
+    AutoStartCheckbox.OnEvent("Click", (*) => ToggleAutoStart())
+
+    ConfigDebugCheckbox := MainGui.Add("Checkbox", "x190 y182", "Enable debug logging (writes debug_log.txt)")
+    ConfigDebugCheckbox.Value := DebugMode
+    ConfigDebugCheckbox.OnEvent("Click", (*) => ToggleDebugMode())
+
+    ; Scheduling & Delays
+    MainGui.Add("GroupBox", "x30 y240 w620 h110", "Scheduling & Delays")
+    MainGui.Add("Text", "x50 y270 w130", "Restart Times (HH:MM):")
+    ConfigRestartTimesEdit := MainGui.Add("Edit", "x190 y268 w440 r1", ArrayToString(RestartTimes, ", "))
+    ConfigRestartTimesEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x50 y300 w130", "Startup Wait (ms):")
+    ConfigStartupWaitEdit := MainGui.Add("Edit", "x190 y298 w120 r1", StartupWaitTime)
+    ConfigStartupWaitEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x330 y300 w170", "Process Close Wait (ms):")
+    ConfigProcessCloseWaitEdit := MainGui.Add("Edit", "x520 y298 w110 r1", ProcessCloseWaitTime)
+    ConfigProcessCloseWaitEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x50 y330 w130", "Menu Delay (ms):")
+    ConfigMenuDelayEdit := MainGui.Add("Edit", "x190 y328 w120 r1", MenuNavigationDelay)
+    ConfigMenuDelayEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    MainGui.Add("Text", "x330 y330 w170", "Exec Config Delay (ms):")
+    ConfigExecDelayEdit := MainGui.Add("Edit", "x520 y328 w110 r1", ExecConfigDelay)
+    ConfigExecDelayEdit.OnEvent("Change", MarkUnsavedChanges)
+
+    ; Exec configs & crash signatures
+    MainGui.Add("GroupBox", "x30 y360 w620 h150", "Exec Configs & Crash Signatures")
+    MainGui.Add("Text", "x50 y390 w120", "Exec Configs:")
+    ConfigExecConfigsEdit := MainGui.Add("Edit", "x50 y410 w260 h80 +VScroll", ExecConfigs.Length ? ArrayToString(ExecConfigs, "`n") : "")
+    ConfigExecConfigsEdit.OnEvent("Change", MarkUnsavedChanges)
+    MainGui.Add("Text", "x330 y390 w130", "Crash Messages:")
+    ConfigCrashMessagesEdit := MainGui.Add("Edit", "x330 y410 w300 h80 +VScroll", CrashMessages.Length ? ArrayToString(CrashMessages, "`n") : "")
+    ConfigCrashMessagesEdit.OnEvent("Change", MarkUnsavedChanges)
+    MainGui.Add("Text", "x50 y495 w260", "One entry per line. Relative config paths resolve from baseq2.")
+
+    MainGui.Add("Button", "x50 y560 w150 h28", "Save Configuration").OnEvent("Click", (*) => SaveConfigChanges())
+    MainGui.Add("Button", "x210 y560 w150 h28", "Reload From File").OnEvent("Click", (*) => ReloadConfig())
+
+    ; === MESSAGES TAB ===
+    Tab.UseTab("Messages")
+    MainGui.Add("GroupBox", "x30 y50 w620 h160", "Reminder Timing")
+    MainGui.Add("Text", "x50 y85 w170", "Reminder Interval (minutes):")
+    MessagesIntervalEdit := MainGui.Add("Edit", "x230 y83 w120 r1", MessageInterval > 0 ? Round(MessageInterval / 60000, 2) : "")
+    MessagesIntervalEdit.OnEvent("Change", MarkUnsavedChanges)
+    MainGui.Add("Text", "x50 y125 w170", "Delay between keys (ms):")
+    MessagesDelayEdit := MainGui.Add("Edit", "x230 y123 w120 r1", MessageDelay)
+    MessagesDelayEdit.OnEvent("Change", MarkUnsavedChanges)
+    MainGui.Add("Text", "x380 y85 w230", "Set how often the script cycles through the bindings.")
+
+    MainGui.Add("GroupBox", "x30 y230 w620 h190", "Reminder Bindings")
+    MainGui.Add("Text", "x50 y265 w80", "Key:")
+    MessagesKeyEdit := MainGui.Add("Edit", "x120 y263 w80 r1 Limit1", "")
+    MainGui.Add("Text", "x210 y265 w80", "Message:")
+    MessagesTextEdit := MainGui.Add("Edit", "x280 y263 w320 r1", "")
+    MainGui.Add("Button", "x50 y295 w100 h26", "Add").OnEvent("Click", (*) => AddReminderBinding())
+    MainGui.Add("Button", "x160 y295 w100 h26", "Update").OnEvent("Click", (*) => UpdateReminderBinding())
+    MainGui.Add("Button", "x270 y295 w140 h26", "Remove Selected").OnEvent("Click", (*) => RemoveReminderBinding())
+    MessagesListView := MainGui.Add("ListView", "x50 y330 w580 h70 +AltSubmit -Multi", ["Key", "Message"])
+    MessagesListView.OnEvent("Click", MessagesListViewSelect)
+
+    MainGui.Add("GroupBox", "x30 y430 w620 h150", "Copy Bind Commands")
+    MainGui.Add("Text", "x50 y460 w540", "Copy these lines into your Quake II config to mirror the bindings above:")
+    MessagesCommandsEdit := MainGui.Add("Edit", "x50 y485 w580 h70 ReadOnly -Wrap +VScroll", "")
+    MainGui.Add("Button", "x50 y560 w150 h28", "Copy to Clipboard").OnEvent("Click", (*) => CopyReminderCommands())
+
+    MainGui.Add("Button", "x220 y560 w150 h28", "Save Configuration").OnEvent("Click", (*) => SaveConfigChanges())
+    MainGui.Add("Button", "x380 y560 w150 h28", "Reload From File").OnEvent("Click", (*) => ReloadConfig())
+
     ; === CONTROLS TAB ===
     Tab.UseTab("Controls")
     
@@ -699,10 +1132,7 @@ CreateGUI() {
     global CrashCheckbox := MainGui.Add("Checkbox", "x50 y400 Checked", "Enable Crash Dialog Detection")
     CrashCheckbox.OnEvent("Click", (*) => ToggleCrashDetection())
     
-    global AutoStartCheckbox := MainGui.Add("Checkbox", "x50 y430", "Start AutoHost automatically when the script launches")
-    AutoStartCheckbox.Value := AutoStartEnabled
-    AutoStartCheckbox.OnEvent("Click", (*) => ToggleAutoStart())
-
+    MainGui.Add("Text", "x50 y430", "Auto-start and other configuration options now live under the Config tab.")
     MainGui.Add("Text", "x50 y460", "Note: Scheduled restarts are always active when AutoHost is running.")
     
     ; === LOGS TAB ===
@@ -712,7 +1142,18 @@ CreateGUI() {
     MainGui.Add("Button", "x180 y450 w140 h35", "Refresh Logs").OnEvent("Click", (*) => RefreshLogs())
     MainGui.Add("Button", "x330 y450 w160 h35", "Open Log File").OnEvent("Click", (*) => OpenLogFile())
     
+    ; === ABOUT TAB ===
+    Tab.UseTab("About")
+    aboutTitle := MainGui.Add("Text", "x20 y60 w640 Center", "Q2RE AutoHost")
+    aboutTitle.SetFont("s8 bold", "Segoe UI")
+    MainGui.Add("Text", "x20 y100 w640 Center", "Version: " . ScriptVersion)
+    MainGui.Add("Text", "x20 y130 w640 Center", 'by ozy')
+    MainGui.Add("Text", "x40 y160 w600 Center", 'https://github.com/ozy24/q2re-autohost')
+
+    
     Tab.UseTab()  ; End tab definition
+    
+    UnsavedLabel := MainGui.Add("Text", "x30 y600 w620 cRed Center", "")
     
     ; Create system tray menu
     A_TrayMenu.Delete()
@@ -731,7 +1172,9 @@ CreateGUI() {
     ; Load existing logs
     RefreshLogs()
     
-    MainGui.Show("w680 h510")
+    MainGui.Show("w680 h680")
+    PopulateMessagesTab()
+    ClearUnsavedChanges()
     Log("GUI initialized - AutoHost stopped, waiting for user to start")
 }
 
@@ -888,13 +1331,16 @@ StopAutoHost() {
 }
 
 BrowseGamePath() {
-    global GamePath, GamePathEdit
+    global GamePath, GamePathEdit, ConfigGamePathEdit
     
     selectedFile := FileSelect(3, GamePath, "Select Quake II Executable", "Executable Files (*.exe)")
     
     if (selectedFile != "") {
         GamePath := selectedFile
-        GamePathEdit.Value := selectedFile
+        if (GamePathEdit)
+            GamePathEdit.Value := selectedFile
+        if (ConfigGamePathEdit)
+            ConfigGamePathEdit.Value := selectedFile
         
         ; Update config file
         IniWrite(selectedFile, A_ScriptDir "\config.ini", "Settings", "GamePath")
@@ -904,6 +1350,257 @@ BrowseGamePath() {
     }
 }
 
+ConfigSelectGamePath() {
+    global ConfigGamePathEdit, GamePath
+
+    startPath := GamePath
+    if (ConfigGamePathEdit && Trim(ConfigGamePathEdit.Value) != "")
+        startPath := ConfigGamePathEdit.Value
+
+    selectedFile := FileSelect(3, startPath, "Select Quake II Executable", "Executable Files (*.exe)")
+
+    if (selectedFile != "" && ConfigGamePathEdit)
+        ConfigGamePathEdit.Value := selectedFile
+}
+
+ToggleDebugMode() {
+    global DebugMode, ConfigDebugCheckbox
+    DebugMode := ConfigDebugCheckbox.Value
+    IniWrite(DebugMode ? "true" : "false", A_ScriptDir "\config.ini", "Settings", "Debug")
+    Log("Debug logging " . (DebugMode ? "enabled" : "disabled"))
+}
+
+SaveConfigChanges() {
+    global ConfigGamePathEdit, ConfigWindowTitleEdit, ConfigExeNameEdit
+    global ConfigRestartTimesEdit, ConfigStartupWaitEdit, ConfigProcessCloseWaitEdit
+    global ConfigMenuDelayEdit, ConfigExecDelayEdit, ConfigExecConfigsEdit
+    global ConfigCrashMessagesEdit, AutoStartCheckbox, ConfigDebugCheckbox
+    global MessagesIntervalEdit, MessagesDelayEdit, ReminderBindings
+    global GamePath, WindowTitle, ExeName, RestartTimes, StartupWaitTime, ProcessCloseWaitTime
+    global MenuNavigationDelay, ExecConfigDelay, ExecConfigs, CrashMessages, MessageInterval
+    global MessageDelay, AutoStartEnabled, DebugMode, AutoHostRunning
+
+    configPath := A_ScriptDir "\config.ini"
+    errors := []
+
+    newGamePath := Trim(ConfigGamePathEdit.Value)
+    if (newGamePath = "")
+        errors.Push("Game path cannot be blank.")
+    else if !FileExist(newGamePath)
+        errors.Push("Game path does not exist: " . newGamePath)
+
+    newWindowTitle := Trim(ConfigWindowTitleEdit.Value)
+    if (newWindowTitle = "")
+        errors.Push("Window title cannot be blank.")
+
+    newExeName := Trim(ConfigExeNameEdit.Value)
+    if (newExeName = "")
+        errors.Push("Executable name cannot be blank.")
+
+    restartInput := StrReplace(Trim(ConfigRestartTimesEdit.Value), "`r")
+    newRestartTimes := []
+    if (restartInput != "") {
+        restartTokens := StrSplit(StrReplace(restartInput, "`n", ","), ",")
+        for token in restartTokens {
+            timeValue := Trim(token)
+            if (timeValue = "")
+                continue
+            if !RegExMatch(timeValue, "^\d{2}:\d{2}$") {
+                errors.Push("Invalid restart time format: " . timeValue)
+                continue
+            }
+            newRestartTimes.Push(timeValue)
+        }
+    }
+    if (newRestartTimes.Length = 0)
+        errors.Push("At least one restart time is required (HH:MM).")
+
+    startupWaitText := Trim(ConfigStartupWaitEdit.Value)
+    if !RegExMatch(startupWaitText, "^\d+$")
+        errors.Push("Startup wait must be a positive number (ms).")
+    startupWaitValue := Number(startupWaitText)
+    if (startupWaitValue <= 0)
+        errors.Push("Startup wait must be greater than zero.")
+
+    processWaitText := Trim(ConfigProcessCloseWaitEdit.Value)
+    if !RegExMatch(processWaitText, "^\d+$")
+        errors.Push("Process close wait must be a positive number (ms).")
+    processWaitValue := Number(processWaitText)
+    if (processWaitValue <= 0)
+        errors.Push("Process close wait must be greater than zero.")
+
+    menuDelayText := Trim(ConfigMenuDelayEdit.Value)
+    if !RegExMatch(menuDelayText, "^\d+$")
+        errors.Push("Menu delay must be zero or a positive number (ms).")
+    menuDelayValue := Number(menuDelayText)
+    if (menuDelayValue < 0)
+        errors.Push("Menu delay cannot be negative.")
+
+    execDelayText := Trim(ConfigExecDelayEdit.Value)
+    if !RegExMatch(execDelayText, "^\d+$")
+        errors.Push("Exec config delay must be zero or a positive number (ms).")
+    execDelayValue := Number(execDelayText)
+    if (execDelayValue < 0)
+        errors.Push("Exec config delay cannot be negative.")
+
+    execConfigsRaw := StrReplace(ConfigExecConfigsEdit.Value, "`r")
+    newExecConfigs := []
+    execSeen := Map()
+    if (Trim(execConfigsRaw) != "") {
+        for line in StrSplit(execConfigsRaw, "`n") {
+            cfg := Trim(line)
+            if (cfg = "")
+                continue
+            key := StrLower(cfg)
+            if execSeen.Has(key)
+                continue
+            execSeen[key] := true
+            newExecConfigs.Push(cfg)
+        }
+    }
+
+    crashRaw := StrReplace(ConfigCrashMessagesEdit.Value, "`r")
+    newCrashMessages := []
+    if (Trim(crashRaw) != "") {
+        for line in StrSplit(crashRaw, "`n") {
+            crash := Trim(line)
+            if (crash = "")
+                continue
+            newCrashMessages.Push(crash)
+        }
+    }
+
+    messageIntervalText := Trim(MessagesIntervalEdit.Value)
+    if !RegExMatch(messageIntervalText, "^\d+(\.\d+)?$")
+        errors.Push("Message interval must be a positive number of minutes.")
+    messageIntervalMinutes := Number(messageIntervalText)
+    if (messageIntervalMinutes <= 0)
+        errors.Push("Message interval must be greater than zero.")
+    messageIntervalMs := Round(messageIntervalMinutes * 60000)
+
+    messageDelayText := Trim(MessagesDelayEdit.Value)
+    if !RegExMatch(messageDelayText, "^\d+$")
+        errors.Push("Delay between keys must be zero or a positive number (ms).")
+    messageDelayValue := Number(messageDelayText)
+    if (messageDelayValue < 0)
+        errors.Push("Delay between keys cannot be negative.")
+
+    normalizedBindings := []
+    idx := 1
+    for binding in ReminderBindings {
+        key := binding.Has("Key") ? Trim(binding["Key"]) : ""
+        text := binding.Has("Text") ? Trim(binding["Text"]) : ""
+
+        if (key = "" && text = "")
+            continue
+
+        entryError := false
+
+        if (key = "") {
+            errors.Push("Reminder entry #" . idx . " is missing a key binding.")
+            entryError := true
+        } else if (StrLen(key) != 1) {
+            errors.Push("Reminder entry #" . idx . " key must be a single character.")
+            entryError := true
+        }
+
+        if (text = "") {
+            errors.Push("Reminder entry #" . idx . " is missing a message.")
+            entryError := true
+        }
+
+        if (!entryError) {
+            normalized := Map()
+            normalized["Key"] := StrLower(key)
+            normalized["Text"] := text
+            normalizedBindings.Push(normalized)
+        }
+
+        idx++
+    }
+
+    if (normalizedBindings.Length = 0)
+        errors.Push("Add at least one reminder binding before saving.")
+
+    if (errors.Length > 0) {
+        errorText := "Cannot save configuration:`n`n"
+        for err in errors
+            errorText .= "• " . err . "`n"
+        MsgBox(errorText, "Validation Errors", 16)
+        return
+    }
+
+    ; Persist Settings
+    IniWrite(newGamePath, configPath, "Settings", "GamePath")
+    IniWrite(newWindowTitle, configPath, "Settings", "WindowTitle")
+    IniWrite(newExeName, configPath, "Settings", "ExeName")
+    IniWrite(ArrayToString(newRestartTimes, ", "), configPath, "Settings", "RestartTimes")
+    IniWrite(newExecConfigs.Length ? ArrayToString(newExecConfigs, ", ") : "", configPath, "Settings", "ExecConfigs")
+    IniWrite(execDelayText, configPath, "Settings", "ExecConfigDelay")
+    IniWrite(AutoStartCheckbox.Value ? "true" : "false", configPath, "Settings", "AutoStart")
+    IniWrite(ConfigDebugCheckbox.Value ? "true" : "false", configPath, "Settings", "Debug")
+    IniWrite(startupWaitText, configPath, "Settings", "StartupWaitTime")
+    IniWrite(processWaitText, configPath, "Settings", "ProcessCloseWaitTime")
+    IniWrite(menuDelayText, configPath, "Settings", "MenuNavigationDelay")
+
+    IniWrite(messageIntervalText, configPath, "Messages", "Interval")
+    IniWrite(messageDelayText, configPath, "Messages", "BetweenDelay")
+
+    ; Clear existing message entries (legacy and new format)
+    idx := 1
+    Loop {
+        existingKey := IniRead(configPath, "Messages", "Message" . idx . "Key", "__missing__")
+        existingText := IniRead(configPath, "Messages", "Message" . idx . "Text", "__missing__")
+        legacy := IniRead(configPath, "Messages", "Message" . idx, "__missing__")
+        if (existingKey = "__missing__" && existingText = "__missing__" && legacy = "__missing__")
+            break
+        IniDelete(configPath, "Messages", "Message" . idx . "Key")
+        IniDelete(configPath, "Messages", "Message" . idx . "Text")
+        IniDelete(configPath, "Messages", "Message" . idx)
+        idx++
+    }
+
+    ; Write new bindings
+    idx := 1
+    for binding in normalizedBindings {
+        IniWrite(binding["Key"], configPath, "Messages", "Message" . idx . "Key")
+        IniWrite(binding["Text"], configPath, "Messages", "Message" . idx . "Text")
+        idx++
+    }
+
+    ; Update in-memory values
+    GamePath := newGamePath
+    WindowTitle := newWindowTitle
+    ExeName := newExeName
+    RestartTimes := newRestartTimes
+    StartupWaitTime := startupWaitValue
+    ProcessCloseWaitTime := processWaitValue
+    MenuNavigationDelay := menuDelayValue
+    ExecConfigDelay := execDelayValue
+    ExecConfigs := newExecConfigs
+    CrashMessages := newCrashMessages
+    MessageInterval := messageIntervalMs
+    MessageDelay := messageDelayValue
+    ReminderBindings := normalizedBindings
+    AutoStartEnabled := AutoStartCheckbox.Value
+    DebugMode := ConfigDebugCheckbox.Value
+
+    if (AutoHostRunning) {
+        SetTimer(SendReminderMessage, 0)
+        if (MessageInterval > 0)
+            SetTimer(SendReminderMessage, MessageInterval)
+    }
+
+    PopulateConfigTab()
+    PopulateMessagesTab()
+    if (GamePathEdit)
+        GamePathEdit.Value := newGamePath
+
+    Log("Configuration saved from Config tab")
+    UpdateGUIStatus()
+    ClearUnsavedChanges()
+    MsgBox("Configuration saved successfully.", "Q2RE AutoHost", 64)
+}
 ManualStartGame() {
     global LastActionText
     Log("Manual start requested from GUI")
@@ -983,6 +1680,7 @@ ReloadConfig() {
     if (result = "Yes") {
         ReadConfig()
         Log("Configuration reloaded")
+        ClearUnsavedChanges()
         MsgBox("Configuration reloaded successfully.", "Q2RE AutoHost", 64)
     }
 }
