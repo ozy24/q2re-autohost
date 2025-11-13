@@ -10,7 +10,7 @@ ArrayToString(arr, delimiter := ", ") {
 
 /* 
   Q2REAutohost.ahk - Quake II Remastered Listen Server Auto-Host
-  Version: 2.1.0
+  Version: 2.1.1
 
   Automates launching, configuring, and managing a multiplayer listen server 
   in the Quake II Remastered Edition (Kex engine) for Steam or GOG.
@@ -37,6 +37,10 @@ ArrayToString(arr, delimiter := ", ") {
 
 /*
  Changelog:
+ 2.1.1
+   - Expanded crash dialog detection to capture full window text
+   - Added configurable handling for Visual C++ runtime error dialogs
+   - Improved crash dialog dismissal button handling
  2.1.0
    - Added Config tab bindings for Reminder Messages with Add/Update/Remove buttons
    - Implemented reminder binding clipboard commands
@@ -52,7 +56,7 @@ SendMode("Input")
 TraySetIcon(A_ScriptDir "\icon.png")
 
 ; --- Global Variables ---
-global ScriptVersion := "2.1.0"
+global ScriptVersion := "2.1.1"
 global LastRunTime := ""
 global DebugMode := true
 global RestartTimes := []
@@ -126,7 +130,7 @@ ReadConfig() {
     dbg := IniRead(iniPath, "Settings", "Debug", "true")
     DebugMode := (StrLower(dbg) = "true")
 
-    crashList := IniRead(iniPath, "Settings", "CrashMessages", "Exception caught in main,ERROR_DEVICE_LOST,Z_Free: bad magic")
+    crashList := IniRead(iniPath, "Settings", "CrashMessages", "Exception caught in main,ERROR_DEVICE_LOST,Z_Free: bad magic,Debug Error!,Run-Time Check Failure #3")
     CrashMessages := StrSplit(crashList, ",")
 
     GamePath := IniRead(iniPath, "Settings", "GamePath", "")
@@ -926,8 +930,74 @@ SendReminderMessage() {
 }
 
 
+GetCrashWindowText(hwnd) {
+    if !hwnd
+        return ""
+
+    fullText := ""
+    try {
+        fullText := WinGetText("ahk_id " . hwnd)
+    }
+
+    staticControls := ["Static1", "Static2", "Static3", "Static4"]
+    for ctrlName in staticControls {
+        try {
+            ctrlText := ControlGetText(ctrlName, hwnd)
+            if (ctrlText != "" && !InStr(fullText, ctrlText)) {
+                if (fullText != "" && SubStr(fullText, -1) != "`n")
+                    fullText .= "`n"
+                fullText .= ctrlText
+            }
+        }
+    }
+
+    return Trim(fullText)
+}
+
+DetectCrashSignature(text) {
+    global CrashMessages
+
+    if (text = "")
+        return false
+
+    for msg in CrashMessages {
+        cleanMsg := Trim(msg)
+        if (cleanMsg = "")
+            continue
+        if InStr(text, cleanMsg, false)
+            return true
+    }
+    return false
+}
+
+DismissCrashWindow(hwnd, message) {
+    if !hwnd
+        return
+    
+    if !TryClickCrashButton(hwnd, "&Abort")
+        if !TryClickCrashButton(hwnd, "&Retry")
+            if !TryClickCrashButton(hwnd, "&Ignore")
+                if !TryClickCrashButton(hwnd, "&OK")
+                    WinClose("ahk_id " . hwnd)
+
+    Sleep(200)
+    Log(">>> Crash window detected and dismissed. Message: " . message)
+}
+
+TryClickCrashButton(hwnd, label) {
+    try {
+        ctrlHwnd := ControlGetHwnd(label, hwnd)
+        if !ctrlHwnd
+            return false
+        ControlClick(label, "ahk_id " . hwnd)
+        return true
+    } catch {
+        return false
+    }
+}
+
 CheckCrashWindow() {
-    global ExeName, CrashMessages, CrashDetectionEnabled, AutoHostRunning
+    global ExeName, CrashDetectionEnabled, AutoHostRunning
     
     ; Only check for crashes if AutoHost is running
     if (!AutoHostRunning) {
@@ -941,16 +1011,23 @@ CheckCrashWindow() {
     
     WinTitle := "ahk_class #32770 ahk_exe " . ExeName
 
-    if WinExist(WinTitle) {
-        hwnd := WinExist(WinTitle)
-        text := ControlGetText("Static2", hwnd)
-        for msg in CrashMessages {
-            if InStr(text, msg, false) {
-                WinClose(hwnd)
-                Log(">>> Crash window detected and closed. Message: " . text)
-                return
-            }
-        }
+    if !WinExist(WinTitle)
+        return
+
+    hwnd := WinExist(WinTitle)
+    text := GetCrashWindowText(hwnd)
+
+    if (text = "")
+        return
+
+    if DetectCrashSignature(text) {
+        DismissCrashWindow(hwnd, text)
+        return
+    }
+
+    ; Handle known Visual C++ runtime dialogs even if not configured explicitly
+    if (InStr(text, "Debug Error!", false) || InStr(text, "Run-Time Check Failure", false)) {
+        DismissCrashWindow(hwnd, text)
     }
 }
 
