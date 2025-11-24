@@ -10,7 +10,7 @@ ArrayToString(arr, delimiter := ", ") {
 
 /* 
   Q2REAutohost.ahk - Quake II Remastered Listen Server Auto-Host
-  Version: 2.1.1
+  Version: 2.1.2
 
   Automates launching, configuring, and managing a multiplayer listen server 
   in the Quake II Remastered Edition (Kex engine) for Steam or GOG.
@@ -37,6 +37,8 @@ ArrayToString(arr, delimiter := ", ") {
 
 /*
  Changelog:
+ 2.1.2
+   - Updated example config for new Q2 update (Oct 23 2025)
  2.1.1
    - Expanded crash dialog detection to capture full window text
    - Added configurable handling for Visual C++ runtime error dialogs
