@@ -1,6 +1,6 @@
 [Settings]
 GamePath=C:\Program Files (x86)\Steam\steamapps\common\Quake 2\quake2.exe
-WindowTitle=Quake II- Version Date: Oct 31 2023 (Vulkan)
+WindowTitle=Quake II- Version Date: Oct 23 2025 (Vulkan)
 ExeName=quake2ex_steam.exe
 RestartTimes=02:00,14:00
 CrashMessages=Exception caught in main,ERROR_DEVICE_LOST,Z_Free: bad magic
